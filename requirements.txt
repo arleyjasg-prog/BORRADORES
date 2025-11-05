@@ -6,3 +6,5 @@ numpy
 plotly.express
 seaborn
 plotly
+fpdf
+xlsxwriter
