@@ -47,10 +47,15 @@ if opcion == "Análisis individual":
 
     if st.sidebar.button("Analizar empresa"):
         data = yf.download(ticker, start=start_date, end=end_date, progress=False)
+
         if data.empty:
             st.error("❌ No se encontraron datos para el ticker especificado.")
         else:
             st.success(f"✅ Datos descargados correctamente para *{ticker}*")
+
+            # 🔧 Si viene con MultiIndex (a veces ocurre), tomar solo el nivel del ticker
+            if isinstance(data.columns, pd.MultiIndex):
+                data = data[ticker]
 
             # Cálculos
             price_col = "Adj Close" if "Adj Close" in data.columns else "Close"
@@ -106,13 +111,16 @@ elif opcion == "Análisis multiempresa":
             st.success(f"✅ Datos descargados correctamente para {', '.join(tickers)}")
 
             resultados = []
+            fig, ax = plt.subplots(figsize=(10, 5))
 
             # 📊 Procesamiento individual de cada ticker
-            fig, ax = plt.subplots(figsize=(10, 5))
             for ticker in tickers:
-                df = data[ticker].copy() if isinstance(data.columns, pd.MultiIndex) else data.copy()
+                try:
+                    df = data[ticker].copy() if isinstance(data.columns, pd.MultiIndex) else data.copy()
+                except KeyError:
+                    st.warning(f"⚠ No se encontraron datos para {ticker}.")
+                    continue
 
-                # Verificar columna de precio
                 price_col = "Adj Close" if "Adj Close" in df.columns else "Close"
                 if price_col not in df.columns:
                     st.warning(f"⚠ {ticker}: No se encontró columna de precio válida.")
@@ -127,9 +135,14 @@ elif opcion == "Análisis multiempresa":
                 ax.plot(df[price_col], linewidth=2, label=ticker)
 
             # 🧮 Mostrar tabla de resultados
-            resultados_df = pd.DataFrame(resultados).set_index("Ticker")
-            st.subheader("📊 Métricas comparativas")
-            st.dataframe(resultados_df.style.format({"Rentabilidad": "{:.2f}%", "Volatilidad": "{:.2f}%", "Sharpe": "{:.2f}"}))
+            if resultados:
+                resultados_df = pd.DataFrame(resultados).set_index("Ticker")
+                st.subheader("📊 Métricas comparativas")
+                st.dataframe(resultados_df.style.format({
+                    "Rentabilidad": "{:.2f}%",
+                    "Volatilidad": "{:.2f}%",
+                    "Sharpe": "{:.2f}"
+                }))
 
             # 📈 Gráfico comparativo de precios
             ax.set_title("Evolución de precios ajustados")
@@ -141,17 +154,24 @@ elif opcion == "Análisis multiempresa":
 
             # 📊 Matriz de correlación
             st.subheader("📈 Correlación entre rendimientos")
-            returns = pd.concat(
-                [data[t]["Adj Close"].pct_change().rename(t) if "Adj Close" in data[t].columns else data[t]["Close"].pct_change().rename(t)
-                 for t in tickers if t in data.columns.get_level_values(0)],
-                axis=1
-            )
+            returns = pd.DataFrame()
 
-            corr = returns.corr()
-            fig2, ax2 = plt.subplots(figsize=(7, 5))
-            sns.heatmap(corr, annot=True, cmap="Blues", ax=ax2)
-            ax2.set_title("Matriz de correlación")
-            st.pyplot(fig2)
+            for ticker in tickers:
+                try:
+                    df = data[ticker].copy() if isinstance(data.columns, pd.MultiIndex) else data.copy()
+                    col = "Adj Close" if "Adj Close" in df.columns else "Close"
+                    returns[ticker] = df[col].pct_change()
+                except KeyError:
+                    continue
+
+            if not returns.empty:
+                corr = returns.corr()
+                fig2, ax2 = plt.subplots(figsize=(7, 5))
+                sns.heatmap(corr, annot=True, cmap="Blues", ax=ax2)
+                ax2.set_title("Matriz de correlación")
+                st.pyplot(fig2)
+            else:
+                st.warning("⚠ No se pudieron calcular las correlaciones por falta de datos válidos.")
 
 # 🪪 Footer
 st.markdown("---")
