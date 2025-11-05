@@ -1,4 +1,4 @@
-# 💼 FinSight – Analizador de Rentabilidad y Riesgo Empresarial (Versión multiportafolio)
+# 💼 FinSight – Analizador de Rentabilidad y Riesgo Empresarial (versión múltiple y robusta)
 import streamlit as st
 import yfinance as yf
 import pandas as pd
@@ -34,7 +34,7 @@ st.markdown("<h4 style='text-align: center; color: gray;'>Analizador de Rentabil
 st.markdown("---")
 
 # 📂 Navegación
-opcion = st.sidebar.radio("Selecciona una vista:", ["Análisis individual", "Análisis multiempresa"])
+opcion = st.sidebar.radio("Selecciona una vista:", ["Análisis individual", "Análisis comparativo"])
 
 # =====================================================
 # 📈 VISTA 1: ANÁLISIS INDIVIDUAL
@@ -53,13 +53,18 @@ if opcion == "Análisis individual":
         else:
             st.success(f"✅ Datos descargados correctamente para *{ticker}*")
 
-            # 🔧 Si viene con MultiIndex (a veces ocurre), tomar solo el nivel del ticker
+            # 🔍 Si viene con MultiIndex (varios niveles), tomar solo el del ticker
             if isinstance(data.columns, pd.MultiIndex):
                 data = data[ticker]
 
-            # Cálculos
+            # ✅ Asegurarse de tener una sola serie
             price_col = "Adj Close" if "Adj Close" in data.columns else "Close"
-            data["Daily Return"] = data[price_col].pct_change()
+            price_series = data[price_col].squeeze()
+
+            # Calcular retornos diarios
+            data["Daily Return"] = price_series.pct_change()
+
+            # Métricas
             avg_return = data["Daily Return"].mean()
             std_dev = data["Daily Return"].std()
             sharpe_ratio = avg_return / std_dev if std_dev != 0 else 0
@@ -75,7 +80,7 @@ if opcion == "Análisis individual":
             # 📉 Gráfico de precios
             st.subheader("📈 Evolución del precio ajustado")
             fig, ax = plt.subplots(figsize=(10, 5))
-            ax.plot(data[price_col], color='#0078D7', linewidth=2)
+            ax.plot(price_series, color='#0078D7', linewidth=2)
             ax.set_title(f"Precio histórico de {ticker}")
             ax.set_xlabel("Fecha")
             ax.set_ylabel("Precio ($)")
@@ -93,85 +98,73 @@ if opcion == "Análisis individual":
             st.dataframe(data.tail(10), use_container_width=True)
 
 # =====================================================
-# 🏦 VISTA 2: ANÁLISIS MULTIEMPRESA (ILIMITADO)
+# 🏦 VISTA 2: ANÁLISIS COMPARATIVO MÚLTIPLE
 # =====================================================
-elif opcion == "Análisis multiempresa":
-    st.sidebar.header("📊 Configuración comparativa múltiple")
-    tickers_input = st.sidebar.text_input("Empresas (separadas por coma):", "AAPL, MSFT, TSLA, NVDA")
+elif opcion == "Análisis comparativo":
+    st.sidebar.header("📊 Configuración comparativa")
+    tickers_input = st.sidebar.text_area("Ingresa los tickers separados por comas:", "AAPL, MSFT, GOOGL, AMZN")
     tickers = [t.strip().upper() for t in tickers_input.split(",") if t.strip()]
     start_date = st.sidebar.date_input("📅 Fecha inicial:", pd.to_datetime("2020-01-01"))
     end_date = st.sidebar.date_input("📅 Fecha final:", pd.to_datetime("2024-12-31"))
 
     if st.sidebar.button("Comparar empresas"):
-        data = yf.download(tickers, start=start_date, end=end_date, progress=False, group_by="ticker")
+        data = yf.download(tickers, start=start_date, end=end_date, progress=False)
 
         if data.empty:
-            st.error("❌ No se encontraron datos para los tickers especificados.")
+            st.error("❌ Verifica los tickers, no se encontraron datos.")
         else:
-            st.success(f"✅ Datos descargados correctamente para {', '.join(tickers)}")
+            st.success(f"✅ Comparando: {', '.join(tickers)}")
 
-            resultados = []
-            fig, ax = plt.subplots(figsize=(10, 5))
+            # Si hay MultiIndex, quedarse con el nivel de precios ajustados o cerrados
+            price_col = "Adj Close" if "Adj Close" in data.columns.get_level_values(0) else "Close"
 
-            # 📊 Procesamiento individual de cada ticker
-            for ticker in tickers:
-                try:
-                    df = data[ticker].copy() if isinstance(data.columns, pd.MultiIndex) else data.copy()
-                except KeyError:
-                    st.warning(f"⚠ No se encontraron datos para {ticker}.")
-                    continue
+            prices = data[price_col].copy()
 
-                price_col = "Adj Close" if "Adj Close" in df.columns else "Close"
-                if price_col not in df.columns:
-                    st.warning(f"⚠ {ticker}: No se encontró columna de precio válida.")
-                    continue
+            # Calcular retornos diarios
+            daily_returns = prices.pct_change()
 
-                df["Daily Return"] = df[price_col].pct_change()
-                avg = df["Daily Return"].mean()
-                std = df["Daily Return"].std()
-                sharpe = avg / std if std != 0 else 0
-                resultados.append({"Ticker": ticker, "Rentabilidad": avg*100, "Volatilidad": std*100, "Sharpe": sharpe})
+            # 📊 Estadísticas principales
+            mean_returns = daily_returns.mean()
+            volatilities = daily_returns.std()
 
-                ax.plot(df[price_col], linewidth=2, label=ticker)
+            summary = pd.DataFrame({
+                "Rentabilidad promedio (%)": mean_returns * 100,
+                "Volatilidad (%)": volatilities * 100,
+                "Sharpe Ratio": (mean_returns / volatilities).replace([np.inf, -np.inf], np.nan)
+            }).dropna()
 
-            # 🧮 Mostrar tabla de resultados
-            if resultados:
-                resultados_df = pd.DataFrame(resultados).set_index("Ticker")
-                st.subheader("📊 Métricas comparativas")
-                st.dataframe(resultados_df.style.format({
-                    "Rentabilidad": "{:.2f}%",
-                    "Volatilidad": "{:.2f}%",
-                    "Sharpe": "{:.2f}"
-                }))
+            st.dataframe(summary.style.format("{:.2f}"), use_container_width=True)
 
             # 📈 Gráfico comparativo de precios
+            st.subheader("📉 Comparación de precios históricos")
+            fig, ax = plt.subplots(figsize=(10, 5))
+            for ticker in prices.columns:
+                ax.plot(prices[ticker], label=ticker, linewidth=2)
+            ax.legend()
             ax.set_title("Evolución de precios ajustados")
             ax.set_xlabel("Fecha")
             ax.set_ylabel("Precio ($)")
-            ax.legend()
-            ax.grid(alpha=0.3)
             st.pyplot(fig)
 
             # 📊 Matriz de correlación
-            st.subheader("📈 Correlación entre rendimientos")
-            returns = pd.DataFrame()
+            st.subheader("📊 Correlación entre rendimientos")
+            corr = daily_returns.corr()
+            fig2, ax2 = plt.subplots(figsize=(8, 6))
+            sns.heatmap(corr, annot=True, cmap="Blues", fmt=".2f", ax=ax2)
+            st.pyplot(fig2)
 
-            for ticker in tickers:
-                try:
-                    df = data[ticker].copy() if isinstance(data.columns, pd.MultiIndex) else data.copy()
-                    col = "Adj Close" if "Adj Close" in df.columns else "Close"
-                    returns[ticker] = df[col].pct_change()
-                except KeyError:
-                    continue
-
-            if not returns.empty:
-                corr = returns.corr()
-                fig2, ax2 = plt.subplots(figsize=(7, 5))
-                sns.heatmap(corr, annot=True, cmap="Blues", ax=ax2)
-                ax2.set_title("Matriz de correlación")
-                st.pyplot(fig2)
-            else:
-                st.warning("⚠ No se pudieron calcular las correlaciones por falta de datos válidos.")
+            # 🧠 Conclusión automática
+            st.markdown("### 📈 Conclusión del análisis")
+            for i in range(len(tickers)):
+                for j in range(i + 1, len(tickers)):
+                    t1, t2 = tickers[i], tickers[j]
+                    c = corr.loc[t1, t2]
+                    if c > 0.7:
+                        st.info(f"🔗 {t1} y {t2} están **fuertemente correlacionadas** — se mueven juntas.")
+                    elif c > 0.3:
+                        st.warning(f"⚖️ {t1} y {t2} tienen **correlación moderada**.")
+                    else:
+                        st.success(f"🌿 {t1} y {t2} están **poco correlacionadas** — buena opción para diversificar.")
 
 # 🪪 Footer
 st.markdown("---")
