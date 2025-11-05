@@ -128,7 +128,7 @@ if st.sidebar.button("🚀 Ejecutar Análisis Completo", type="primary"):
             with col1:
                 st.dataframe(data.tail(10), use_container_width=True)
             with col2:
-                st.metric("Período", f"{len(data)} {frecuencia.lower()}s")
+                st.metric("Período", f"{len(data)} períodos")
                 st.metric("Empresas", len(tickers))
             
             # Gráfico de evolución de precios
@@ -143,6 +143,7 @@ if st.sidebar.button("🚀 Ejecutar Análisis Completo", type="primary"):
             ax1.grid(True, alpha=0.3)
             plt.tight_layout()
             st.pyplot(fig1)
+            plt.close()
             
             # ============================================
             # SECCIÓN 2: CÁLCULO DE RETORNOS
@@ -175,6 +176,7 @@ if st.sidebar.button("🚀 Ejecutar Análisis Completo", type="primary"):
                 ax2.axhline(y=0, color='black', linestyle='--', linewidth=0.8)
                 plt.tight_layout()
                 st.pyplot(fig2)
+                plt.close()
             
             # Retornos acumulados
             st.subheader("📈 Retornos Acumulados")
@@ -190,6 +192,7 @@ if st.sidebar.button("🚀 Ejecutar Análisis Completo", type="primary"):
             ax3.axhline(y=0, color='black', linestyle='--', linewidth=0.8)
             plt.tight_layout()
             st.pyplot(fig3)
+            plt.close()
             
             # ============================================
             # SECCIÓN 3: MÉTRICAS ANUALIZADAS
@@ -235,6 +238,7 @@ if st.sidebar.button("🚀 Ejecutar Análisis Completo", type="primary"):
                 ax4.set_title('Matriz de Correlación de Retornos', fontsize=14, fontweight='bold')
                 plt.tight_layout()
                 st.pyplot(fig4)
+                plt.close()
             
             with col2:
                 st.subheader("📋 Interpretación")
@@ -301,6 +305,7 @@ if st.sidebar.button("🚀 Ejecutar Análisis Completo", type="primary"):
                 ax5.pie(weights, labels=tickers, autopct='%1.1f%%', startangle=90, colors=colors)
                 ax5.set_title('Distribución de Pesos del Portafolio', fontsize=12, fontweight='bold')
                 st.pyplot(fig5)
+                plt.close()
             
             # Métricas principales
             st.subheader("📊 Métricas del Portafolio")
@@ -339,6 +344,7 @@ if st.sidebar.button("🚀 Ejecutar Análisis Completo", type="primary"):
             ax6.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'${x:,.0f}'))
             plt.tight_layout()
             st.pyplot(fig6)
+            plt.close()
             
             col1, col2, col3 = st.columns(3)
             with col1:
@@ -432,6 +438,7 @@ if st.sidebar.button("🚀 Ejecutar Análisis Completo", type="primary"):
             ax7.grid(True, alpha=0.3)
             plt.tight_layout()
             st.pyplot(fig7)
+            plt.close()
             
             # ============================================
             # SECCIÓN 8: PORTAFOLIO ÓPTIMO
@@ -489,7 +496,13 @@ if st.sidebar.button("🚀 Ejecutar Análisis Completo", type="primary"):
             # ============================================
             st.header("9️⃣ Distribución de Retornos (Histogramas)")
             
-            fig8, axes = plt.subplots(2, (len(tickers) + 1) // 2, figsize=(16, 8))
+            # Calcular número de filas necesarias
+            n_cols = 2
+            n_rows = (len(tickers) + n_cols - 1) // n_cols
+            
+            fig8, axes = plt.subplots(n_rows, n_cols, figsize=(16, 4 * n_rows))
+            if n_rows == 1:
+                axes = axes.reshape(1, -1)
             axes = axes.flatten()
             
             for idx, ticker in enumerate(tickers):
@@ -507,6 +520,7 @@ if st.sidebar.button("🚀 Ejecutar Análisis Completo", type="primary"):
             
             plt.tight_layout()
             st.pyplot(fig8)
+            plt.close()
             
             # Histograma del portafolio
             st.subheader("Distribución de Retornos del Portafolio")
@@ -520,6 +534,7 @@ if st.sidebar.button("🚀 Ejecutar Análisis Completo", type="primary"):
             ax9.legend(fontsize=11)
             plt.tight_layout()
             st.pyplot(fig9)
+            plt.close()
             
             # ============================================
             # SECCIÓN 10: BENCHMARK (OPCIONAL)
@@ -546,6 +561,7 @@ if st.sidebar.button("🚀 Ejecutar Análisis Completo", type="primary"):
                 ax10.grid(True, alpha=0.3)
                 plt.tight_layout()
                 st.pyplot(fig10)
+                plt.close()
                 
                 # Métricas de comparación
                 col1, col2, col3 = st.columns(3)
@@ -566,31 +582,40 @@ if st.sidebar.button("🚀 Ejecutar Análisis Completo", type="primary"):
             st.header("1️⃣1️⃣ Exportar Resultados")
             
             # Preparar datos para exportar
-            export_data = {
-                'Simulaciones': pd.DataFrame({
-                    'Volatilidad': results[0, :],
-                    'Retorno': results[1, :],
-                    'Sharpe': results[2, :]
-                }),
-                'Portafolio_Actual': pd.DataFrame({
-                    'Ticker': tickers,
-                    'Peso': weights,
-                    'Inversion': weights * inversion_inicial
-                }),
-                'Portafolio_Optimo': pd.DataFrame({
-                    'Ticker': tickers,
-                    'Peso_Optimo': optimal_weights,
-                    'Inversion_Sugerida': optimal_weights * inversion_inicial
-                }),
-                'Metricas': pd.DataFrame({
-                    'Metrica': ['Retorno_Anual', 'Volatilidad', 'Sharpe', 'Inversion_Inicial', 'Valor_Final'],
-                    'Portafolio_Actual': [portfolio_return, portfolio_volatility, sharpe_ratio, inversion_inicial, valor_final],
-                    'Portafolio_Optimo': [mejor_retorno, mejor_volatilidad, mejor_sharpe, inversion_inicial, 
-                                         inversion_inicial * (1 + np.dot(optimal_weights, retornos_acumulados.iloc[-1]))]
-                })
-            }
+            df_simulaciones = pd.DataFrame({
+                'Volatilidad': results[0, :],
+                'Retorno': results[1, :],
+                'Sharpe': results[2, :]
+            })
+            
+            df_portafolio_actual = pd.DataFrame({
+                'Ticker': tickers,
+                'Peso': weights,
+                'Inversion': weights * inversion_inicial
+            })
+            
+            df_portafolio_optimo = pd.DataFrame({
+                'Ticker': tickers,
+                'Peso_Optimo': optimal_weights,
+                'Inversion_Sugerida': optimal_weights * inversion_inicial
+            })
             
             col1, col2, col3 = st.columns(3)
             
             with col1:
-                csv_simulaciones = export_data['Simulaciones'].to_csv(index=False)
+                csv_simulaciones = df_simulaciones.to_csv(index=False)
+                st.download_button(
+                    label="📥 Descargar Simulaciones",
+                    data=csv_simulaciones,
+                    file_name="simulaciones_monte_carlo.csv",
+                    mime="text/csv"
+                )
+            
+            with col2:
+                csv_actual = df_portafolio_actual.to_csv(index=False)
+                st.download_button(
+                    label="📥 Descargar Portafolio Actual",
+                    data=csv_actual,
+                    file_name="portafolio_actual.csv",
+                    mime="text/csv"
+                )
