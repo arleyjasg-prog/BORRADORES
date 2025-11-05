@@ -1,621 +1,229 @@
-# -*- coding: utf-8 -*-
-"""
-FinanSmart - Análisis Completo de Portafolio de Inversión
-Aplicación Streamlit para análisis financiero con todos los parámetros requeridos
-"""
-
+# 💼 FinSight – Analizador de Rentabilidad y Riesgo Empresarial (Versión Final)
 import streamlit as st
 import yfinance as yf
-import numpy as np
 import pandas as pd
+import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
-from datetime import datetime
+from io import BytesIO
+from fpdf import FPDF
 
-# Configuración de la página
-st.set_page_config(
-    page_title="FinanSmart - Análisis de Portafolio",
-    page_icon="📊",
-    layout="wide"
-)
+# ==========================================
+# CONFIGURACIÓN INICIAL
+# ==========================================
+st.set_page_config(page_title="FinSight", page_icon="💼", layout="wide")
 
-# Título principal
-st.title("📊 FinanSmart - Análisis Completo de Portafolio de Inversión")
+st.markdown("""
+    <style>
+    .main { background-color: #F9FAFB; }
+    h1, h2, h3 { color: #002B5B; }
+    .stButton>button {
+        background-color: #0078D7;
+        color: white;
+        border-radius: 10px;
+        height: 3em;
+        font-weight: bold;
+    }
+    footer {visibility: hidden;}
+    </style>
+""", unsafe_allow_html=True)
+
+st.markdown("<h1 style='text-align: center;'>💼 FinSight</h1>", unsafe_allow_html=True)
+st.markdown("<h4 style='text-align: center; color: gray;'>Analizador de Rentabilidad y Riesgo Empresarial</h4>", unsafe_allow_html=True)
 st.markdown("---")
 
-# Sidebar para configuración
-st.sidebar.header("⚙️ Configuración del Análisis")
+# ==========================================
+# FUNCIONES DE EXPORTACIÓN
+# ==========================================
+def exportar_excel(df):
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        df.to_excel(writer, index=True, sheet_name='FinSight Report')
+    return output.getvalue()
 
-# 1. Selección de empresas (tickers)
-st.sidebar.subheader("1️⃣ Selección de Empresas")
-default_tickers = ["AAPL", "MSFT", "AMZN", "GOOGL", "META"]
-tickers_input = st.sidebar.text_area(
-    "Tickers (uno por línea o separados por comas)",
-    value="\n".join(default_tickers),
-    height=100
-)
-# Procesar tickers (aceptar comas o saltos de línea)
-tickers = [t.strip().upper() for t in tickers_input.replace(",", "\n").split("\n") if t.strip()]
-st.sidebar.info(f"📈 {len(tickers)} empresas seleccionadas")
-
-# 2. Pesos del portafolio
-st.sidebar.subheader("2️⃣ Pesos del Portafolio")
-peso_option = st.sidebar.radio(
-    "Método de asignación:",
-    ["Pesos iguales", "Pesos personalizados", "Optimización automática"]
-)
-
-weights_custom = None
-if peso_option == "Pesos personalizados":
-    st.sidebar.write("Ingresa los pesos (deben sumar 1.0):")
-    weights_custom = []
-    for ticker in tickers:
-        peso = st.sidebar.number_input(
-            f"{ticker}",
-            min_value=0.0,
-            max_value=1.0,
-            value=1.0/len(tickers),
-            step=0.01,
-            key=f"peso_{ticker}"
-        )
-        weights_custom.append(peso)
-    suma_pesos = sum(weights_custom)
-    if abs(suma_pesos - 1.0) > 0.01:
-        st.sidebar.warning(f"⚠️ Los pesos suman {suma_pesos:.2f}. Deben sumar 1.0")
-    else:
-        st.sidebar.success(f"✅ Pesos válidos (suma = {suma_pesos:.2f})")
-
-# 3. Inversión inicial
-st.sidebar.subheader("3️⃣ Inversión Inicial")
-inversion_inicial = st.sidebar.number_input(
-    "Monto de inversión ($)",
-    min_value=100,
-    max_value=10000000,
-    value=10000,
-    step=1000,
-    format="%d"
-)
-
-# 4. Período de análisis
-st.sidebar.subheader("4️⃣ Período de Análisis")
-col1, col2 = st.sidebar.columns(2)
-with col1:
-    start_date = st.date_input("Fecha inicio", value=pd.to_datetime("2020-01-01"))
-with col2:
-    end_date = st.date_input("Fecha fin", value=pd.to_datetime("2023-12-31"))
-
-# 5. Frecuencia temporal
-st.sidebar.subheader("5️⃣ Frecuencia Temporal")
-frecuencia = st.sidebar.selectbox(
-    "Frecuencia de datos:",
-    ["Diaria", "Semanal", "Mensual"]
-)
-freq_map = {"Diaria": "1d", "Semanal": "1wk", "Mensual": "1mo"}
-intervalo = freq_map[frecuencia]
-
-# Número de simulaciones para Monte Carlo
-num_portfolios = st.sidebar.slider(
-    "Simulaciones Monte Carlo",
-    min_value=1000,
-    max_value=50000,
-    value=10000,
-    step=1000
-)
-
-# Botón para ejecutar análisis
-if st.sidebar.button("🚀 Ejecutar Análisis Completo", type="primary"):
+def exportar_pdf(df):
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Arial", size=12)
     
-    with st.spinner("Descargando y procesando datos..."):
-        try:
-            # Descarga de datos
-            data = yf.download(tickers, start=start_date, end=end_date, interval=intervalo, progress=False)['Close']
-            
-            if data.empty:
-                st.error("No se pudieron descargar datos. Verifica los tickers y las fechas.")
-                st.stop()
-            
-            # Si solo hay un ticker, convertir a DataFrame
-            if len(tickers) == 1:
-                data = pd.DataFrame(data, columns=tickers)
-            
-            st.success("✅ Datos descargados exitosamente")
-            
-            # ============================================
-            # SECCIÓN 1: DATOS HISTÓRICOS
-            # ============================================
-            st.header("1️⃣ Datos Históricos de Precios")
-            col1, col2 = st.columns([3, 1])
-            with col1:
-                st.dataframe(data.tail(10), use_container_width=True)
-            with col2:
-                st.metric("Período", f"{len(data)} períodos")
-                st.metric("Empresas", len(tickers))
-            
-            # Gráfico de evolución de precios
-            st.subheader("📈 Serie de Tiempo de Precios")
-            fig1, ax1 = plt.subplots(figsize=(14, 6))
-            for ticker in tickers:
-                ax1.plot(data.index, data[ticker], label=ticker, linewidth=2)
-            ax1.set_title('Evolución Histórica de Precios Ajustados', fontsize=14, fontweight='bold')
-            ax1.set_xlabel('Fecha', fontsize=12)
-            ax1.set_ylabel('Precio ($)', fontsize=12)
-            ax1.legend(loc='best', fontsize=10)
-            ax1.grid(True, alpha=0.3)
-            plt.tight_layout()
-            st.pyplot(fig1)
-            plt.close()
-            
-            # ============================================
-            # SECCIÓN 2: CÁLCULO DE RETORNOS
-            # ============================================
-            st.header("2️⃣ Retornos por Período")
-            
-            # Calcular retornos
-            returns = data.pct_change().dropna()
-            
-            # Retornos acumulados
-            retornos_acumulados = (1 + returns).cumprod() - 1
-            
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                st.subheader("📊 Estadísticas de Retornos")
-                stats_df = returns.describe()
-                st.dataframe(stats_df.style.format("{:.4f}"), use_container_width=True)
-            
-            with col2:
-                st.subheader(f"📉 Retornos {frecuencia}s")
-                fig2, ax2 = plt.subplots(figsize=(10, 6))
-                for ticker in tickers:
-                    ax2.plot(returns.index, returns[ticker], label=ticker, alpha=0.7, linewidth=1)
-                ax2.set_title(f'Retornos {frecuencia}s', fontsize=12, fontweight='bold')
-                ax2.set_xlabel('Fecha')
-                ax2.set_ylabel('Retorno')
-                ax2.legend(loc='best', fontsize=9)
-                ax2.grid(True, alpha=0.3)
-                ax2.axhline(y=0, color='black', linestyle='--', linewidth=0.8)
-                plt.tight_layout()
-                st.pyplot(fig2)
-                plt.close()
-            
-            # Retornos acumulados
-            st.subheader("📈 Retornos Acumulados")
-            fig3, ax3 = plt.subplots(figsize=(14, 6))
-            for ticker in tickers:
-                ax3.plot(retornos_acumulados.index, retornos_acumulados[ticker] * 100, 
-                        label=ticker, linewidth=2)
-            ax3.set_title('Evolución de Retornos Acumulados', fontsize=14, fontweight='bold')
-            ax3.set_xlabel('Fecha', fontsize=12)
-            ax3.set_ylabel('Retorno Acumulado (%)', fontsize=12)
-            ax3.legend(loc='best')
-            ax3.grid(True, alpha=0.3)
-            ax3.axhline(y=0, color='black', linestyle='--', linewidth=0.8)
-            plt.tight_layout()
-            st.pyplot(fig3)
-            plt.close()
-            
-            # ============================================
-            # SECCIÓN 3: MÉTRICAS ANUALIZADAS
-            # ============================================
-            st.header("3️⃣ Volatilidad Histórica y Anualizada")
-            
-            # Factor de anualización según frecuencia
-            if frecuencia == "Diaria":
-                factor_anual = 252
-            elif frecuencia == "Semanal":
-                factor_anual = 52
-            else:  # Mensual
-                factor_anual = 12
-            
-            # Cálculos anualizados
-            mean_returns_annual = returns.mean() * factor_anual
-            volatilidad_annual = returns.std() * np.sqrt(factor_anual)
-            
-            st.subheader("📊 Métricas Anualizadas por Activo")
-            metrics_df = pd.DataFrame({
-                'Retorno Anual Esperado': mean_returns_annual,
-                'Volatilidad Anual (σ)': volatilidad_annual,
-                'Coef. Variación': volatilidad_annual / mean_returns_annual.replace(0, np.nan)
-            })
-            st.dataframe(metrics_df.style.format({
-                'Retorno Anual Esperado': '{:.2%}',
-                'Volatilidad Anual (σ)': '{:.2%}',
-                'Coef. Variación': '{:.2f}'
-            }), use_container_width=True)
-            
-            # ============================================
-            # SECCIÓN 4: CORRELACIÓN
-            # ============================================
-            st.header("4️⃣ Matriz de Correlación")
-            col1, col2 = st.columns([2, 1])
-            
-            with col1:
-                fig4, ax4 = plt.subplots(figsize=(10, 8))
-                corr_matrix = returns.corr()
-                sns.heatmap(corr_matrix, annot=True, cmap='RdYlGn', center=0, 
-                           fmt='.2f', ax=ax4, square=True, linewidths=1,
-                           cbar_kws={'label': 'Correlación'})
-                ax4.set_title('Matriz de Correlación de Retornos', fontsize=14, fontweight='bold')
-                plt.tight_layout()
-                st.pyplot(fig4)
-                plt.close()
-            
-            with col2:
-                st.subheader("📋 Interpretación")
-                st.write("""
-                **Correlación:**
-                - 🟩 Verde: Correlación positiva
-                - 🟥 Rojo: Correlación negativa
-                - ⬜ Blanco: No correlación
-                
-                **Diversificación:**
-                - Valores cercanos a 0 o negativos indican mejor diversificación
-                """)
-                
-                # Estadísticas de correlación
-                corr_values = corr_matrix.values[np.triu_indices_from(corr_matrix.values, k=1)]
-                st.metric("Correlación Promedio", f"{corr_values.mean():.2f}")
-                st.metric("Correlación Máxima", f"{corr_values.max():.2f}")
-                st.metric("Correlación Mínima", f"{corr_values.min():.2f}")
-            
-            # ============================================
-            # SECCIÓN 5: ANÁLISIS DE PORTAFOLIO
-            # ============================================
-            st.header("5️⃣ Análisis del Portafolio")
-            
-            # Determinar pesos según la opción seleccionada
-            if peso_option == "Pesos iguales":
-                weights = np.array([1/len(tickers)] * len(tickers))
-            elif peso_option == "Pesos personalizados" and weights_custom:
-                weights = np.array(weights_custom)
-            else:
-                # Se calculará en la optimización
-                weights = np.array([1/len(tickers)] * len(tickers))
-            
-            # Cálculos del portafolio
-            portfolio_return = np.dot(weights, mean_returns_annual)
-            cov_matrix_annual = returns.cov() * factor_anual
-            portfolio_volatility = np.sqrt(np.dot(weights.T, np.dot(cov_matrix_annual, weights)))
-            sharpe_ratio = portfolio_return / portfolio_volatility if portfolio_volatility != 0 else 0
-            
-            # Valor final del portafolio
-            retorno_total_periodo = np.dot(weights, retornos_acumulados.iloc[-1])
-            valor_final = inversion_inicial * (1 + retorno_total_periodo)
-            ganancia_perdida = valor_final - inversion_inicial
-            
-            st.subheader(f"💼 Portafolio Configurado ({peso_option})")
-            
-            # Mostrar pesos
-            col1, col2 = st.columns([1, 1])
-            with col1:
-                pesos_df = pd.DataFrame({
-                    'Empresa': tickers,
-                    'Peso': weights,
-                    'Inversión ($)': weights * inversion_inicial
-                })
-                st.dataframe(pesos_df.style.format({
-                    'Peso': '{:.2%}',
-                    'Inversión ($)': '${:,.2f}'
-                }), use_container_width=True)
-            
-            with col2:
-                # Gráfico de torta
-                fig5, ax5 = plt.subplots(figsize=(8, 8))
-                colors = plt.cm.Set3(range(len(tickers)))
-                ax5.pie(weights, labels=tickers, autopct='%1.1f%%', startangle=90, colors=colors)
-                ax5.set_title('Distribución de Pesos del Portafolio', fontsize=12, fontweight='bold')
-                st.pyplot(fig5)
-                plt.close()
-            
-            # Métricas principales
-            st.subheader("📊 Métricas del Portafolio")
+    # Título
+    pdf.cell(200, 10, txt="Reporte FinSight - Rentabilidad y Riesgo", ln=True, align='C')
+    pdf.ln(10)
+    
+    # Encabezados
+    for col in df.columns:
+        texto_col = str(col).encode('latin-1', 'replace').decode('latin-1')
+        pdf.cell(60, 10, txt=texto_col, border=1, align='C')
+    pdf.ln()
+    
+    # Filas
+    for i in range(len(df)):
+        for val in df.iloc[i]:
+            texto = str(val).encode('latin-1', 'replace').decode('latin-1')
+            pdf.cell(60, 10, txt=texto, border=1, align='C')
+        pdf.ln()
+    
+    # Exportación corregida (modo seguro para Streamlit)
+    pdf_bytes = pdf.output(dest='S').encode('latin-1')  # devuelve el PDF como cadena binaria
+    return pdf_bytes
+
+# ==========================================
+# MENÚ PRINCIPAL
+# ==========================================
+opcion = st.sidebar.radio("Selecciona una vista:", ["Análisis individual", "Análisis comparativo"])
+
+# ==========================================
+# 📈 ANÁLISIS INDIVIDUAL
+# ==========================================
+if opcion == "Análisis individual":
+    st.sidebar.header("⚙ Configuración de análisis individual")
+    ticker = st.sidebar.text_input("📊 Ticker de la empresa:", "AAPL")
+    start_date = st.sidebar.date_input("📅 Fecha inicial:", pd.to_datetime("2020-01-01"))
+    end_date = st.sidebar.date_input("📅 Fecha final:", pd.to_datetime("2024-12-31"))
+
+    if st.sidebar.button("Analizar empresa"):
+        data = yf.download(ticker, start=start_date, end=end_date, progress=False)
+        if data.empty:
+            st.error("❌ No se encontraron datos para el ticker especificado.")
+        else:
+            st.success(f"✅ Datos descargados correctamente para {ticker}")
+
+            price_col = "Adj Close" if "Adj Close" in data.columns else "Close"
+            data["Daily Return"] = data[price_col].pct_change()
+            avg_return = data["Daily Return"].mean()
+            std_dev = data["Daily Return"].std()
+            risk_free_rate = 0
+            sharpe_ratio = (avg_return - risk_free_rate) / std_dev if std_dev != 0 else 0
+            vol_anual = std_dev * np.sqrt(252)
+            cum_return = (1 + data["Daily Return"]).prod() - 1
+
+            # --- Métricas ---
             col1, col2, col3, col4 = st.columns(4)
-            
-            with col1:
-                st.metric("Retorno Anual Esperado", f"{portfolio_return:.2%}")
-            with col2:
-                st.metric("Volatilidad Anual", f"{portfolio_volatility:.2%}")
-            with col3:
-                st.metric("Sharpe Ratio", f"{sharpe_ratio:.2f}")
-            with col4:
-                st.metric("Inversión Inicial", f"${inversion_inicial:,.2f}")
-            
-            # ============================================
-            # SECCIÓN 6: EVOLUCIÓN DEL VALOR MONETARIO
-            # ============================================
-            st.header("6️⃣ Evolución del Valor Monetario del Portafolio")
-            
-            # Calcular valor del portafolio en el tiempo
-            portfolio_returns = (returns * weights).sum(axis=1)
-            portfolio_value = inversion_inicial * (1 + portfolio_returns).cumprod()
-            
-            fig6, ax6 = plt.subplots(figsize=(14, 6))
-            ax6.plot(portfolio_value.index, portfolio_value, linewidth=2.5, color='darkblue', label='Valor del Portafolio')
-            ax6.axhline(y=inversion_inicial, color='red', linestyle='--', linewidth=1.5, label='Inversión Inicial')
-            ax6.fill_between(portfolio_value.index, inversion_inicial, portfolio_value, 
-                            where=(portfolio_value >= inversion_inicial), alpha=0.3, color='green', label='Ganancia')
-            ax6.fill_between(portfolio_value.index, inversion_inicial, portfolio_value, 
-                            where=(portfolio_value < inversion_inicial), alpha=0.3, color='red', label='Pérdida')
-            ax6.set_title('Evolución del Valor del Portafolio', fontsize=14, fontweight='bold')
-            ax6.set_xlabel('Fecha', fontsize=12)
-            ax6.set_ylabel('Valor ($)', fontsize=12)
-            ax6.legend(loc='best')
-            ax6.grid(True, alpha=0.3)
-            ax6.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'${x:,.0f}'))
-            plt.tight_layout()
-            st.pyplot(fig6)
-            plt.close()
-            
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric("Valor Final", f"${valor_final:,.2f}", 
-                         delta=f"${ganancia_perdida:,.2f}")
-            with col2:
-                st.metric("Retorno Total", f"{retorno_total_periodo:.2%}")
-            with col3:
-                max_value = portfolio_value.max()
-                st.metric("Valor Máximo Alcanzado", f"${max_value:,.2f}")
-            
-            # ============================================
-            # SECCIÓN 7: DIAGRAMA RIESGO-RETORNO
-            # ============================================
-            st.header("7️⃣ Diagrama Riesgo-Retorno (Frontera Eficiente)")
-            
-            with st.spinner(f"Simulando {num_portfolios:,} portafolios..."):
-                results = np.zeros((4, num_portfolios))
-                weights_record = []
-                
-                for i in range(num_portfolios):
-                    w = np.random.random(len(tickers))
-                    w /= np.sum(w)
-                    weights_record.append(w)
-                    
-                    ret = np.dot(w, mean_returns_annual)
-                    vol = np.sqrt(np.dot(w.T, np.dot(cov_matrix_annual, w)))
-                    sharpe = ret / vol if vol != 0 else 0
-                    
-                    results[0, i] = vol
-                    results[1, i] = ret
-                    results[2, i] = sharpe
-                    results[3, i] = i
-            
-            # Encontrar portafolios importantes
-            max_sharpe_idx = np.argmax(results[2])
-            min_vol_idx = np.argmin(results[0])
-            
-            # Gráfico de frontera eficiente
-            fig7, ax7 = plt.subplots(figsize=(14, 8))
-            scatter = ax7.scatter(
-                results[0, :] * 100,
-                results[1, :] * 100,
-                c=results[2, :],
-                cmap='viridis',
-                alpha=0.6,
-                s=20,
-                edgecolors='none'
-            )
-            
-            # Marcar portafolios especiales
-            ax7.scatter(
-                results[0, max_sharpe_idx] * 100,
-                results[1, max_sharpe_idx] * 100,
-                c='red',
-                s=500,
-                marker='*',
-                edgecolors='black',
-                linewidths=2,
-                label='Máximo Sharpe',
-                zorder=5
-            )
-            ax7.scatter(
-                results[0, min_vol_idx] * 100,
-                results[1, min_vol_idx] * 100,
-                c='blue',
-                s=300,
-                marker='D',
-                edgecolors='black',
-                linewidths=2,
-                label='Mínima Volatilidad',
-                zorder=5
-            )
-            ax7.scatter(
-                portfolio_volatility * 100,
-                portfolio_return * 100,
-                c='orange',
-                s=300,
-                marker='s',
-                edgecolors='black',
-                linewidths=2,
-                label='Portafolio Actual',
-                zorder=5
-            )
-            
-            ax7.set_xlabel('Riesgo - Volatilidad (%)', fontsize=12)
-            ax7.set_ylabel('Retorno Esperado (%)', fontsize=12)
-            ax7.set_title('Frontera Eficiente - Simulación Monte Carlo', fontsize=14, fontweight='bold')
-            plt.colorbar(scatter, label='Sharpe Ratio', ax=ax7)
-            ax7.legend(loc='best', fontsize=10)
-            ax7.grid(True, alpha=0.3)
-            plt.tight_layout()
-            st.pyplot(fig7)
-            plt.close()
-            
-            # ============================================
-            # SECCIÓN 8: PORTAFOLIO ÓPTIMO
-            # ============================================
-            st.header("8️⃣ Portafolio Óptimo (Máximo Sharpe Ratio)")
-            
-            optimal_weights = weights_record[max_sharpe_idx]
-            mejor_volatilidad = results[0, max_sharpe_idx]
-            mejor_retorno = results[1, max_sharpe_idx]
-            mejor_sharpe = results[2, max_sharpe_idx]
-            
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric("🏆 Sharpe Ratio", f"{mejor_sharpe:.3f}")
-            with col2:
-                st.metric("📈 Retorno Esperado", f"{mejor_retorno:.2%}")
-            with col3:
-                st.metric("📊 Volatilidad", f"{mejor_volatilidad:.2%}")
-            
-            st.subheader("Composición del Portafolio Óptimo")
-            optimal_df = pd.DataFrame({
-                'Empresa': tickers,
-                'Peso Óptimo': optimal_weights,
-                'Inversión Sugerida ($)': optimal_weights * inversion_inicial
+            col1.metric("Rentabilidad promedio", f"{avg_return*100:.2f}%")
+            col2.metric("Volatilidad diaria", f"{std_dev*100:.2f}%")
+            col3.metric("Volatilidad anualizada", f"{vol_anual*100:.2f}%")
+            col4.metric("Índice de Sharpe", f"{sharpe_ratio:.2f}")
+
+            st.markdown(f"### 📊 Rentabilidad acumulada: *{cum_return*100:.2f}%*")
+
+            # --- Exportación ---
+            resumen_df = pd.DataFrame({
+                "Métrica": ["Rentabilidad promedio (%)", "Volatilidad diaria (%)", "Volatilidad anualizada (%)", "Índice de Sharpe", "Rentabilidad acumulada (%)"],
+                "Valor": [f"{avg_return*100:.2f}", f"{std_dev*100:.2f}", f"{vol_anual*100:.2f}", f"{sharpe_ratio:.2f}", f"{cum_return*100:.2f}"]
             })
-            st.dataframe(optimal_df.style.format({
-                'Peso Óptimo': '{:.2%}',
-                'Inversión Sugerida ($)': '${:,.2f}'
-            }), use_container_width=True)
-            
-            # Comparación con portafolio actual
-            st.subheader("📊 Comparación: Portafolio Actual vs Óptimo")
-            comparison_df = pd.DataFrame({
-                'Métrica': ['Retorno Anual', 'Volatilidad', 'Sharpe Ratio'],
-                'Portafolio Actual': [
-                    f"{portfolio_return:.2%}",
-                    f"{portfolio_volatility:.2%}",
-                    f"{sharpe_ratio:.2f}"
-                ],
-                'Portafolio Óptimo': [
-                    f"{mejor_retorno:.2%}",
-                    f"{mejor_volatilidad:.2%}",
-                    f"{mejor_sharpe:.2f}"
-                ],
-                'Diferencia': [
-                    f"{(mejor_retorno - portfolio_return):.2%}",
-                    f"{(mejor_volatilidad - portfolio_volatility):.2%}",
-                    f"{(mejor_sharpe - sharpe_ratio):.2f}"
-                ]
-            })
-            st.dataframe(comparison_df, use_container_width=True)
-            
-            # ============================================
-            # SECCIÓN 9: HISTOGRAMAS Y DISTRIBUCIONES
-            # ============================================
-            st.header("9️⃣ Distribución de Retornos (Histogramas)")
-            
-            # Calcular número de filas necesarias
-            n_cols = 2
-            n_rows = (len(tickers) + n_cols - 1) // n_cols
-            
-            fig8, axes = plt.subplots(n_rows, n_cols, figsize=(16, 4 * n_rows))
-            if n_rows == 1:
-                axes = axes.reshape(1, -1)
-            axes = axes.flatten()
-            
-            for idx, ticker in enumerate(tickers):
-                axes[idx].hist(returns[ticker] * 100, bins=50, alpha=0.7, color='steelblue', edgecolor='black')
-                axes[idx].set_title(f'{ticker}', fontsize=11, fontweight='bold')
-                axes[idx].set_xlabel('Retorno (%)', fontsize=9)
-                axes[idx].set_ylabel('Frecuencia', fontsize=9)
-                axes[idx].axvline(returns[ticker].mean() * 100, color='red', linestyle='--', linewidth=2, label='Media')
-                axes[idx].grid(True, alpha=0.3)
-                axes[idx].legend(fontsize=8)
-            
-            # Ocultar ejes sobrantes
-            for idx in range(len(tickers), len(axes)):
-                axes[idx].axis('off')
-            
-            plt.tight_layout()
-            st.pyplot(fig8)
-            plt.close()
-            
-            # Histograma del portafolio
-            st.subheader("Distribución de Retornos del Portafolio")
-            fig9, ax9 = plt.subplots(figsize=(12, 6))
-            ax9.hist(portfolio_returns * 100, bins=50, alpha=0.7, color='darkgreen', edgecolor='black')
-            ax9.set_title('Distribución de Retornos del Portafolio', fontsize=14, fontweight='bold')
-            ax9.set_xlabel('Retorno (%)', fontsize=12)
-            ax9.set_ylabel('Frecuencia', fontsize=12)
-            ax9.axvline(portfolio_returns.mean() * 100, color='red', linestyle='--', linewidth=2, label=f'Media = {portfolio_returns.mean()*100:.2f}%')
-            ax9.grid(True, alpha=0.3)
-            ax9.legend(fontsize=11)
-            plt.tight_layout()
-            st.pyplot(fig9)
-            plt.close()
-            
-            # ============================================
-            # SECCIÓN 10: BENCHMARK (OPCIONAL)
-            # ============================================
-            st.header("🔟 Benchmark - Comparación con el Mercado")
-            
-            try:
-                # Descargar S&P 500 como benchmark
-                benchmark_data = yf.download("^GSPC", start=start_date, end=end_date, 
-                                           interval=intervalo, progress=False)['Close']
-                benchmark_returns = benchmark_data.pct_change().dropna()
-                benchmark_cumulative = (1 + benchmark_returns).cumprod()
-                portfolio_cumulative = (1 + portfolio_returns).cumprod()
-                
-                fig10, ax10 = plt.subplots(figsize=(14, 6))
-                ax10.plot(portfolio_cumulative.index, portfolio_cumulative, 
-                         linewidth=2.5, label='Portafolio', color='darkblue')
-                ax10.plot(benchmark_cumulative.index, benchmark_cumulative, 
-                         linewidth=2.5, label='S&P 500 (Benchmark)', color='orange', linestyle='--')
-                ax10.set_title('Comparación con el Mercado (S&P 500)', fontsize=14, fontweight='bold')
-                ax10.set_xlabel('Fecha', fontsize=12)
-                ax10.set_ylabel('Crecimiento (base 1)', fontsize=12)
-                ax10.legend(loc='best', fontsize=11)
-                ax10.grid(True, alpha=0.3)
-                plt.tight_layout()
-                st.pyplot(fig10)
-                plt.close()
-                
-                # Métricas de comparación
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.metric("Retorno Portafolio", f"{(portfolio_cumulative.iloc[-1] - 1):.2%}")
-                with col2:
-                    st.metric("Retorno S&P 500", f"{(benchmark_cumulative.iloc[-1] - 1):.2%}")
-                with col3:
-                    alpha = (portfolio_cumulative.iloc[-1] - 1) - (benchmark_cumulative.iloc[-1] - 1)
-                    st.metric("Alpha", f"{alpha:.2%}", delta="vs Mercado")
-                
-            except Exception as e:
-                st.warning("No se pudo descargar el benchmark (S&P 500). Continuando sin comparación.")
-            
-            # ============================================
-            # SECCIÓN 11: EXPORTAR RESULTADOS
-            # ============================================
-            st.header("1️⃣1️⃣ Exportar Resultados")
-            
-            # Preparar datos para exportar
-            df_simulaciones = pd.DataFrame({
-                'Volatilidad': results[0, :],
-                'Retorno': results[1, :],
-                'Sharpe': results[2, :]
-            })
-            
-            df_portafolio_actual = pd.DataFrame({
-                'Ticker': tickers,
-                'Peso': weights,
-                'Inversion': weights * inversion_inicial
-            })
-            
-            df_portafolio_optimo = pd.DataFrame({
-                'Ticker': tickers,
-                'Peso_Optimo': optimal_weights,
-                'Inversion_Sugerida': optimal_weights * inversion_inicial
-            })
-            
-            col1, col2, col3 = st.columns(3)
-            
-            with col1:
-                csv_simulaciones = df_simulaciones.to_csv(index=False)
-                st.download_button(
-                    label="📥 Descargar Simulaciones",
-                    data=csv_simulaciones,
-                    file_name="simulaciones_monte_carlo.csv",
-                    mime="text/csv"
-                )
-            
-            with col2:
-                csv_actual = df_portafolio_actual.to_csv(index=False)
-                st.download_button(
-                    label="📥 Descargar Portafolio Actual",
-                    data=csv_actual,
-                    file_name="portafolio_actual.csv",
-                    mime="text/csv"
-                )
+
+            excel_data = exportar_excel(resumen_df)
+            pdf_data = exportar_pdf(resumen_df)
+            colx, coly = st.columns(2)
+            colx.download_button("⬇️ Descargar reporte Excel", data=excel_data, file_name=f"FinSight_{ticker}.xlsx")
+            coly.download_button("📄 Descargar reporte PDF", data=pdf_data, file_name=f"FinSight_{ticker}.pdf")
+
+            # --- Gráficos ---
+            st.subheader("📈 Evolución del precio ajustado")
+            fig, ax = plt.subplots(figsize=(10,5))
+            ax.plot(data[price_col], color='#0078D7', linewidth=2)
+            ax.set_title(f"Precio histórico de {ticker}")
+            ax.set_xlabel("Fecha")
+            ax.set_ylabel("Precio ($)")
+            st.pyplot(fig)
+
+            st.subheader("📊 Distribución de los rendimientos diarios")
+            fig2, ax2 = plt.subplots(figsize=(8,4))
+            sns.histplot(data["Daily Return"].dropna(), bins=40, kde=True, color='#009688', ax=ax2)
+            st.pyplot(fig2)
+
+# ==========================================
+# 📊 ANÁLISIS COMPARATIVO
+# ==========================================
+elif opcion == "Análisis comparativo":
+    st.sidebar.header("⚙ Configuración comparativa")
+    tickers_input = st.sidebar.text_input("Empresas (separa por comas):", "AAPL, MSFT, NFLX, IBM")
+    start_date = st.sidebar.date_input("Fecha inicial:", pd.to_datetime("2020-01-01"))
+    end_date = st.sidebar.date_input("Fecha final:", pd.to_datetime("2024-12-31"))
+    inversion_inicial = st.sidebar.number_input("💰 Inversión inicial ($):", value=10000.0, min_value=100.0)
+    frecuencia = st.sidebar.selectbox("📅 Frecuencia temporal:", ["Diaria", "Semanal", "Mensual"])
+    intervalo = {"Diaria": "1d", "Semanal": "1wk", "Mensual": "1mo"}[frecuencia]
+
+    tickers = [t.strip().upper() for t in tickers_input.split(",") if t.strip()]
+
+    if st.sidebar.button("Comparar empresas"):
+        if len(tickers) < 2:
+            st.warning("Por favor, ingresa al menos dos empresas para comparar.")
+        else:
+            st.info("Descargando datos...")
+            data = yf.download(tickers, start=start_date, end=end_date, interval=intervalo, progress=False, group_by="ticker")
+
+            if data.empty:
+                st.error("❌ No se encontraron datos para los tickers ingresados.")
+            else:
+                st.success(f"Comparando: {', '.join(tickers)}")
+
+                # Calcular retornos
+                daily_returns = pd.DataFrame()
+                for ticker in tickers:
+                    df = data[ticker]
+                    price_col = "Adj Close" if "Adj Close" in df.columns else "Close"
+                    daily_returns[ticker] = df[price_col].pct_change()
+
+                avg_returns = daily_returns.mean()
+                std_devs = daily_returns.std()
+                vol_anual = std_devs * np.sqrt(252)
+                sharpe_ratios = (avg_returns - 0) / std_devs
+                corr_matrix = daily_returns.corr()
+
+                # --- Valor del portafolio ---
+                retornos_acum = (1 + daily_returns).cumprod()
+                valor_portafolio = inversion_inicial * retornos_acum
+
+                # --- Tabla resumen ---
+                metrics_df = pd.DataFrame({
+                    "Rentabilidad promedio (%)": avg_returns * 100,
+                    "Volatilidad diaria (%)": std_devs * 100,
+                    "Volatilidad anualizada (%)": vol_anual * 100,
+                    "Índice de Sharpe": sharpe_ratios
+                }).round(2)
+                st.dataframe(metrics_df.style.highlight_max(color="#FF69B4", axis=0))
+
+                # --- Descargas ---
+                excel_data = exportar_excel(metrics_df)
+                pdf_data = exportar_pdf(metrics_df)
+                colx, coly = st.columns(2)
+                colx.download_button("⬇️ Descargar comparativo Excel", data=excel_data, file_name="FinSight_Comparativo.xlsx")
+                coly.download_button("📄 Descargar comparativo PDF", data=pdf_data, file_name="FinSight_Comparativo.pdf")
+
+                # --- Gráficos ---
+                st.subheader("📈 Índice de Sharpe por empresa")
+                fig3, ax3 = plt.subplots(figsize=(8,4))
+                sharpe_ratios.sort_values().plot(kind='bar', color='#009688', ax=ax3)
+                st.pyplot(fig3)
+
+                st.subheader("📊 Evolución del valor del portafolio")
+                fig4, ax4 = plt.subplots(figsize=(10,5))
+                for ticker in tickers:
+                    ax4.plot(valor_portafolio.index, valor_portafolio[ticker], label=ticker)
+                ax4.set_title("Evolución del valor del portafolio")
+                ax4.set_xlabel("Fecha")
+                ax4.set_ylabel("Valor ($)")
+                ax4.legend()
+                st.pyplot(fig4)
+
+                st.subheader("🔗 Matriz de correlación")
+                fig5, ax5 = plt.subplots(figsize=(6,5))
+                sns.heatmap(corr_matrix, annot=True, cmap="Blues", fmt=".2f", ax=ax5)
+                st.pyplot(fig5)
+
+                st.subheader("📈 Diagrama riesgo–retorno (Rendimiento vs Volatilidad)")
+                fig6, ax6 = plt.subplots(figsize=(7,5))
+                ax6.scatter(std_devs * 100, avg_returns * 100, s=120, color="#0078D7")
+                for i, ticker in enumerate(tickers):
+                    ax6.text(std_devs[i] * 100 + 0.05, avg_returns[i] * 100, ticker, fontsize=9)
+                ax6.set_xlabel("Riesgo (Volatilidad %)")
+                ax6.set_ylabel("Rentabilidad promedio (%)")
+                ax6.set_title("Diagrama riesgo–retorno")
+                st.pyplot(fig6)
+
+# ==========================================
+# FOOTER
+# ==========================================
+st.markdown("---")
+st.markdown("<p style='text-align:center; color:gray;'>© 2025 FinSight | Desarrollado por Angie, Jhony y Dayana</p>", unsafe_allow_html=True)
